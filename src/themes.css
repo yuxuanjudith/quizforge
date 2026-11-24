@@ -1,0 +1,46 @@
+/*
+ * QuizForge theme — "forge": warm paper, ink type, one ember accent.
+ * Applied via <html data-theme="forge"> in index.html. The slate default in
+ * styles.css stays as the dark fallback.
+ */
+
+/* App tokens that are the same in every theme: the four answer colors and
+ * the display face. Picked to stay distinguishable on a projector and to
+ * pass 3:1 against their own label color. */
+@theme {
+  --color-ink: #1c1917;
+  --color-ember: #d9480f;
+  --color-opt-a: #d9480f;
+  --color-opt-b: #0f766e;
+  --color-opt-c: #f2b134;
+  --color-opt-d: #5b4b8a;
+  --font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+}
+
+[data-theme="forge"] {
+  color-scheme: light;
+  --color-background: #f6f2ea;
+  --color-foreground: #1c1917;
+  --color-card: #fffdf8;
+  --color-card-foreground: #1c1917;
+  --color-popover: #fffdf8;
+  --color-popover-foreground: #1c1917;
+  --color-primary: #1c1917;
+  --color-primary-foreground: #fffdf8;
+  --color-secondary: #ece6da;
+  --color-secondary-foreground: #1c1917;
+  --color-muted: #ebe5d8;
+  --color-muted-foreground: #6b6358;
+  --color-accent: #e7dfcf;
+  --color-accent-foreground: #1c1917;
+  --color-destructive: #b42318;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #ddd4c3;
+  --color-input: #d6ccb9;
+  --color-ring: #d9480f;
+  --radius: 0.75rem;
+  --shadow-card: 0 1px 2px 0 rgba(28, 25, 23, 0.04);
+  --shadow-card-hover: 0 4px 14px 0 rgba(28, 25, 23, 0.08);
+  --color-shell: #f6f2ea;
+  --color-shell-panel: #fffdf8;
+}
