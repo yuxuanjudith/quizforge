@@ -38,7 +38,11 @@ export const quizzesSchema: CollectionSchema = {
 /**
  * Questions, including the answer key. Owner-only reads: a player (or a
  * player's AI agent calling records.query) gets zero rows back.
- * The host edits questions directly through RBAC — no action needed.
+ *
+ * Owners cannot write here directly either. RBAC can limit WHICH fields a
+ * role may write, but not WHAT values: a direct put could store
+ * answerIndex 7 or three options and break the game. Edits go through the
+ * `updateQuestion` action, which runs the same validator as AI output.
  */
 export const questionsSchema: CollectionSchema = {
   name: 'questions',
@@ -53,13 +57,7 @@ export const questionsSchema: CollectionSchema = {
   ],
   permissions: {
     viewer: { read: false, ...ACTIONS_ONLY },
-    member: {
-      read: 'own',
-      create: false,
-      update: 'own',
-      delete: false,
-      writableFields: ['prompt', 'options', 'answerIndex', 'explanation'],
-    },
+    member: { read: 'own', ...ACTIONS_ONLY },
     admin: { read: true, create: true, update: true, delete: true },
   },
 }
@@ -136,6 +134,26 @@ export const responsesSchema: CollectionSchema = {
     { name: 'msTaken', storage: 'number', interpretation: 'plain' },
   ],
   uniqueOn: ['gameId', 'questionIndex', 'userId'],
+  permissions: {
+    viewer: { read: false, ...ACTIONS_ONLY },
+    member: { read: 'own', ...ACTIONS_ONLY },
+    admin: { read: true, create: true, update: true, delete: true },
+  },
+}
+
+/**
+ * One row per owner-billed call attempt (AI generation, read-aloud). Actions
+ * count a user's rows in the last 24 h before calling a paid integration, so
+ * one account cannot drain the owner's credits. Written by actions only;
+ * users can read their own rows (to show "3 of 10 left" later).
+ */
+export const usageSchema: CollectionSchema = {
+  name: 'usage_events',
+  columns: [
+    { name: 'userId', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'kind', storage: 'text', interpretation: { kind: 'select', options: ['generate', 'speak'] } },
+    { name: 'at', storage: 'number', interpretation: 'plain', required: true },
+  ],
   permissions: {
     viewer: { read: false, ...ACTIONS_ONLY },
     member: { read: 'own', ...ACTIONS_ONLY },

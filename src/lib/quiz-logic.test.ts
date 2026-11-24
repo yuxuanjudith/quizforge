@@ -11,6 +11,7 @@ import {
   rankPlayers,
   scoreAnswer,
   tallyChoices,
+  validateQuestion,
   validateQuestions,
 } from './quiz-logic'
 
@@ -99,9 +100,52 @@ describe('validateQuestions', () => {
     expect(() => validateQuestions([good('only one')], 5)).toThrow()
   })
 
-  it('drops non-http source urls', () => {
-    const [q] = validateQuestions([{ ...good('Q1'), sourceUrl: 'javascript:alert(1)' }, good('Q2'), good('Q3')], 3)
+  it('keeps a source link only if the search actually returned it', () => {
+    const fetched = ['https://science.nasa.gov/webb']
+    const out = validateQuestions(
+      [
+        { ...good('Q1'), sourceUrl: 'https://science.nasa.gov/webb' },
+        { ...good('Q2'), sourceUrl: 'https://made-up.example.com/page' },
+        { ...good('Q3'), sourceUrl: 'javascript:alert(1)' },
+      ],
+      3,
+      fetched,
+    )
+    expect(out[0].sourceUrl).toBe('https://science.nasa.gov/webb')
+    expect(out[1].sourceUrl).toBeUndefined()
+    expect(out[2].sourceUrl).toBeUndefined()
+  })
+
+  it('drops every link in notes mode (no search, nothing to cite)', () => {
+    const [q] = validateQuestions([{ ...good('Q1'), sourceUrl: 'https://x.example' }, good('Q2'), good('Q3')], 3)
     expect(q.sourceUrl).toBeUndefined()
+  })
+})
+
+describe('validateQuestion (host edits use the same rules)', () => {
+  const base = { prompt: 'Q', options: ['a', 'b', 'c', 'd'], answerIndex: 0, explanation: '' }
+
+  it('accepts a valid edit', () => {
+    expect(validateQuestion(base).ok).toBe(true)
+  })
+
+  it('rejects an answer index outside the options', () => {
+    expect(validateQuestion({ ...base, answerIndex: 7 }).ok).toBe(false)
+    expect(validateQuestion({ ...base, answerIndex: -1 }).ok).toBe(false)
+    expect(validateQuestion({ ...base, answerIndex: 1.5 }).ok).toBe(false)
+  })
+
+  it('rejects the wrong number of options, blanks and duplicates', () => {
+    expect(validateQuestion({ ...base, options: ['a', 'b', 'c'] }).ok).toBe(false)
+    expect(validateQuestion({ ...base, options: ['a', 'b', 'c', 'd', 'e'] }).ok).toBe(false)
+    expect(validateQuestion({ ...base, options: ['a', 'b', 'c', '  '] }).ok).toBe(false)
+    expect(validateQuestion({ ...base, options: ['a', 'B', 'b', 'c'] }).ok).toBe(false)
+  })
+
+  it('rejects an empty prompt and over-long text', () => {
+    expect(validateQuestion({ ...base, prompt: '   ' }).ok).toBe(false)
+    expect(validateQuestion({ ...base, prompt: 'x'.repeat(301) }).ok).toBe(false)
+    expect(validateQuestion({ ...base, explanation: 'x'.repeat(401) }).ok).toBe(false)
   })
 })
 

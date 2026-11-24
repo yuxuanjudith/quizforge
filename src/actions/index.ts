@@ -18,6 +18,8 @@
 import type { ActionHandler, ActionResult, ActionTools } from 'deepspace/worker'
 import type { Env } from '../../worker'
 import {
+  DAILY_LIMITS,
+  DAY_MS,
   DEFAULT_DURATION_SEC,
   MAX_QUESTIONS,
   MIN_QUESTIONS,
@@ -27,6 +29,8 @@ import {
   normalizeJoinCode,
   scoreAnswer,
   tallyChoices,
+  validateQuestion,
+  type UsageKind,
 } from '../lib/quiz-logic'
 import { SAMPLE_QUESTIONS, SAMPLE_TITLE } from '../lib/sample-quiz'
 import { generateQuestions, generateRecap } from '../server/quiz/ai'
@@ -118,6 +122,24 @@ async function questionAt(tools: ActionTools, quizId: string, order: number) {
   return rows[0] ?? null
 }
 
+/**
+ * Per-user daily cap on owner-billed integrations. Counts this user's
+ * attempts in the last 24 h and records the new one BEFORE the paid call.
+ * Not atomic: a burst of parallel requests can overshoot (README, Known limits).
+ * Failed calls still count: the owner may have paid for them anyway.
+ */
+async function takeQuota(tools: ActionTools, userId: string, kind: UsageKind): Promise<ActionResult | null> {
+  const since = Date.now() - DAY_MS
+  const rows = await queryRows<{ at: number }>(tools, 'usage_events', { userId, kind }, 1000)
+  const used = rows.filter((r) => r.data.at > since).length
+  if (used >= DAILY_LIMITS[kind]) {
+    const what = kind === 'generate' ? 'quiz generations' : 'read-alouds'
+    return fail(`Daily limit reached: ${DAILY_LIMITS[kind]} ${what} per 24 hours. Try again tomorrow.`, 'rate_limited')
+  }
+  const res = await tools.create('usage_events', { userId, kind, at: Date.now() })
+  return res.success ? null : fail(res.error)
+}
+
 // ─── reveal (shared by the host button, the timer and the last answer) ───
 
 /**
@@ -166,6 +188,9 @@ const generateQuiz: ActionHandler<Env> = async ({ userId, params, tools }) => {
   const count = Math.min(MAX_QUESTIONS, Math.max(MIN_QUESTIONS, Number(params.count) || 8))
   if (!notes && !topic) return fail('Paste some notes or enter a topic.', 'invalid_input')
   if (notes && notes.length < 200) return fail('Notes are too short to quiz on — add at least a paragraph.', 'invalid_input')
+
+  const limited = await takeQuota(tools, userId, 'generate')
+  if (limited) return limited
 
   let sources: SourceDoc[] = []
   if (!notes) {
@@ -429,6 +454,8 @@ const speakQuestion: ActionHandler<Env> = async ({ userId, params, tools }) => {
   if (error) return error
   if (game.data.phase !== 'question') return fail('No question is showing.', 'wrong_phase')
   const g = game.data as Game & { currentPrompt?: string; currentOptions?: string[] }
+  const limited = await takeQuota(tools, userId, 'speak')
+  if (limited) return limited
   const letters = ['A', 'B', 'C', 'D']
   const text = `${g.currentPrompt ?? ''} ${(g.currentOptions ?? []).map((o, i) => `${letters[i]}: ${o}.`).join(' ')}`
   try {
@@ -436,6 +463,35 @@ const speakQuestion: ActionHandler<Env> = async ({ userId, params, tools }) => {
   } catch (err) {
     return fail(err instanceof Error ? err.message : 'Speech failed.', 'speech_failed')
   }
+}
+
+/**
+ * Host: edit one question. Ownership is checked here (tools bypass RBAC) and
+ * the new content runs through the same `validateQuestion` as AI output, so
+ * the server never stores a question the game cannot play. An edit can't
+ * add a source link: only links the search returned are allowed, and the
+ * existing one is kept.
+ */
+const updateQuestion: ActionHandler<Env> = async ({ userId, params, tools }) => {
+  const question = await getRow<Question & { sourceUrl?: string }>(tools, 'questions', params.questionId)
+  if (!question || question.createdBy !== userId) return fail('Question not found.', 'not_found')
+
+  const existingSource = question.data.sourceUrl ? [question.data.sourceUrl] : []
+  const result = validateQuestion(
+    {
+      prompt: params.prompt,
+      options: params.options,
+      answerIndex: params.answerIndex,
+      explanation: params.explanation ?? '',
+      sourceUrl: question.data.sourceUrl,
+    },
+    existingSource,
+  )
+  if (!result.ok) return fail(result.reason, 'invalid_input')
+
+  const { prompt, options, answerIndex, explanation } = result.question
+  const res = await tools.update('questions', question.recordId, { prompt, options, answerIndex, explanation })
+  return res.success ? ok({ updated: true }) : fail(res.error)
 }
 
 /** Host: delete a quiz and its questions (RBAC-off tools, so ownership is checked here). */
@@ -465,5 +521,6 @@ export const actions: Record<string, ActionHandler<Env>> = {
   revealAnswer,
   finishGame: (ctx) => finishGame(ctx),
   speakQuestion,
+  updateQuestion,
   deleteQuiz,
 }

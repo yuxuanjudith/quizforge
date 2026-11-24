@@ -14,6 +14,7 @@ import {
   questionsSchema,
   quizzesSchema,
   responsesSchema,
+  usageSchema,
 } from './schemas/quiz-schemas'
 
 export const schemas: CollectionSchema[] = [
@@ -24,4 +25,5 @@ export const schemas: CollectionSchema[] = [
   gamesSchema,
   playersSchema,
   responsesSchema,
+  usageSchema,
 ]

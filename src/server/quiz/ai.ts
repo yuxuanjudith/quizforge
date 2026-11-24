@@ -73,7 +73,9 @@ export async function generateQuestions(
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const text = await complete(tools, QUIZ_MODEL, QUIZ_SYSTEM, parts.join('\n\n'), 4000)
-      return validateQuestions(extractJson(text), input.count)
+      // Only URLs the search really returned may be cited.
+      const allowed = (input.sources ?? []).map((src) => src.url)
+      return validateQuestions(extractJson(text), input.count, allowed)
     } catch (error) {
       lastError = error
     }

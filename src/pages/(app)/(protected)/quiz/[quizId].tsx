@@ -2,14 +2,15 @@
  * /quiz/:quizId — the host reviews and edits AI-written questions, then
  * opens a live game.
  *
- * Edits are plain `put`s through RBAC: `questions` grants the owner
- * `update: 'own'` limited to prompt/options/answerIndex/explanation, so no
- * server action is needed and nobody else can edit (or even read) them.
+ * Edits go through the `updateQuestion` server action, which checks the
+ * caller owns the question and validates the content with the same rules
+ * as AI output. The check in this component is only for instant feedback;
+ * the server is the one that enforces it.
  */
 
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { useMutations, useQuery } from 'deepspace'
+import { useQuery } from 'deepspace'
 import { ExternalLink, Pencil, Play, Trash2 } from 'lucide-react'
 import { Button, ConfirmModal, Input, Textarea, buttonVariants, cn, useToast } from '@/components/ui'
 import { callAction } from '../../../../lib/actions-client'
@@ -134,29 +135,34 @@ export default function QuizPage() {
 function QuestionCard({ q, n }: { q: Q; n: number }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(q.data)
-  const { putConfirmed, ready } = useMutations<QuestionRow>('questions')
+  const [saving, setSaving] = useState(false)
   const toast = useToast()
 
   useEffect(() => {
     if (!editing) setDraft(q.data)
   }, [q.data, editing])
 
+  // Instant feedback only — `updateQuestion` re-checks everything server-side.
   const valid =
     draft.prompt.trim().length > 0 &&
     draft.options.every((o) => o.trim().length > 0) &&
     new Set(draft.options.map((o) => o.trim().toLowerCase())).size === draft.options.length
 
   async function save() {
+    setSaving(true)
     try {
-      await putConfirmed(q.recordId, {
-        prompt: draft.prompt.trim(),
-        options: draft.options.map((o) => o.trim()),
+      await callAction('updateQuestion', {
+        questionId: q.recordId,
+        prompt: draft.prompt,
+        options: draft.options,
         answerIndex: draft.answerIndex,
-        explanation: draft.explanation?.trim() ?? '',
+        explanation: draft.explanation ?? '',
       })
       setEditing(false)
     } catch (err) {
       toast.error('Not saved', err instanceof Error ? err.message : undefined)
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -229,7 +235,7 @@ function QuestionCard({ q, n }: { q: Q; n: number }) {
           {editing ? (
             <>
               <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
-              <Button size="sm" onClick={save} disabled={!valid || !ready}>Save</Button>
+              <Button size="sm" onClick={save} disabled={!valid} loading={saving}>Save</Button>
             </>
           ) : (
             <Button size="sm" variant="ghost" onClick={() => setEditing(true)} aria-label={`Edit question ${n}`}>
