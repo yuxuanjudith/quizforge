@@ -116,6 +116,12 @@ describe('validateQuestions', () => {
     expect(out[2].sourceUrl).toBeUndefined()
   })
 
+  it('trims an over-long AI explanation instead of dropping the question', () => {
+    const out = validateQuestions([{ ...good('Q1'), explanation: 'x'.repeat(900) }, good('Q2'), good('Q3')], 3)
+    expect(out).toHaveLength(3)
+    expect(out[0].explanation.length).toBe(400)
+  })
+
   it('drops every link in notes mode (no search, nothing to cite)', () => {
     const [q] = validateQuestions([{ ...good('Q1'), sourceUrl: 'https://x.example' }, good('Q2'), good('Q3')], 3)
     expect(q.sourceUrl).toBeUndefined()

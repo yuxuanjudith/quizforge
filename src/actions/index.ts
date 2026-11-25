@@ -94,8 +94,9 @@ async function queryRows<T>(
   collection: string,
   where: Record<string, unknown>,
   limit = 500,
+  order?: { orderBy: string; orderDir: 'asc' | 'desc' },
 ): Promise<Row<T>[]> {
-  const res = await tools.query<T & Record<string, unknown>>(collection, { where, limit })
+  const res = await tools.query<T & Record<string, unknown>>(collection, { where, limit, ...order })
   return res.success ? (res.data.records as unknown as Row<T>[]) : []
 }
 
@@ -130,7 +131,14 @@ async function questionAt(tools: ActionTools, quizId: string, order: number) {
  */
 async function takeQuota(tools: ActionTools, userId: string, kind: UsageKind): Promise<ActionResult | null> {
   const since = Date.now() - DAY_MS
-  const rows = await queryRows<{ at: number }>(tools, 'usage_events', { userId, kind }, 1000)
+  // Newest first, and only as many rows as the cap: if the newest `limit`
+  // attempts all fall inside the window, the user is at the cap. Without the
+  // ordering, a long history could push recent rows out of the page and the
+  // cap would silently stop working.
+  const rows = await queryRows<{ at: number }>(tools, 'usage_events', { userId, kind }, DAILY_LIMITS[kind], {
+    orderBy: 'at',
+    orderDir: 'desc',
+  })
   const used = rows.filter((r) => r.data.at > since).length
   if (used >= DAILY_LIMITS[kind]) {
     const what = kind === 'generate' ? 'quiz generations' : 'read-alouds'
@@ -475,6 +483,20 @@ const speakQuestion: ActionHandler<Env> = async ({ userId, params, tools }) => {
 const updateQuestion: ActionHandler<Env> = async ({ userId, params, tools }) => {
   const question = await getRow<Question & { sourceUrl?: string }>(tools, 'questions', params.questionId)
   if (!question || question.createdBy !== userId) return fail('Question not found.', 'not_found')
+
+  // An edit must not change a question players are answering, or one already
+  // scored: scores were computed against the old answer, and the reveal and
+  // recap would show the new one. Games idle for 2 h count as abandoned, so a
+  // closed host tab can't lock the quiz forever.
+  const games = await queryRows<Game>(tools, 'games', { quizId: question.data.quizId })
+  const staleBefore = Date.now() - 2 * 60 * 60 * 1000
+  const locked = games.some(
+    (g) =>
+      (g.data.phase === 'question' || g.data.phase === 'reveal') &&
+      (g.data.questionEndsAt ?? 0) > staleBefore &&
+      question.data.order <= g.data.questionIndex,
+  )
+  if (locked) return fail('This question is in a live game. Edit it after the game ends.', 'in_game')
 
   const existingSource = question.data.sourceUrl ? [question.data.sourceUrl] : []
   const result = validateQuestion(

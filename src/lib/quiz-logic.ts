@@ -143,7 +143,14 @@ export function validateQuestions(
   const out: DraftQuestion[] = []
   const seenPrompts = new Set<string>()
   for (const item of list) {
-    const result = validateQuestion(item, allowedSourceUrls)
+    // A rambling explanation is not worth losing the question over: trim it
+    // for model output. (Host edits are capped at 400 in the form and
+    // rejected by the server above that, so nothing is silently cut there.)
+    const trimmed =
+      item && typeof item === 'object' && typeof (item as { explanation?: unknown }).explanation === 'string'
+        ? { ...item, explanation: ((item as { explanation: string }).explanation).trim().slice(0, 400) }
+        : item
+    const result = validateQuestion(trimmed, allowedSourceUrls)
     if (!result.ok) continue
     const key = result.question.prompt.toLowerCase()
     if (seenPrompts.has(key)) continue
